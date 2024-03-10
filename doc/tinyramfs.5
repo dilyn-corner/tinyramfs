@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "tinyramfs" "5" "2022-05-11" "tinyramfs" "2022-05-09"
+.TH "tinyramfs" "5" "2024-03-12" "tinyramfs" "2022-05-09"
 .P
 .SH NAME
 .P
@@ -47,6 +47,7 @@ monolith
 .RS 4
 (bool) Instructs tinyramfs whether or not to include kernel modules in
 the initramfs.\&
+monolith should be set if you are cross-building the initramfs.\&
 .P
 .RE
 compress
@@ -67,6 +68,51 @@ root_type
 .P
 .RS 4
 The filesystem you'\&re using for your root device (eg.\& ext4).\&
+.P
+.RE
+cross
+.P
+.RS 4
+(bool) Instructs tinyramfs whether or not the created initramfs is for
+an architecture different from the host.\&
+.P
+.RE
+sysroot
+.P
+.RS 4
+A fully-qualified path to some target-architecture sysroot.\&
+Only makes sense when setting cross=0.\&
+.P
+.RE
+arch_triplet
+.P
+.RS 4
+The architecture triplet of the targeted architecture.\&
+Valid examples include:
+.RS 4
+x86_64-linux-gnu
+aarch64-linux-gnu
+arm-linux-gnueabihf
+riscv64-linux-gnu
+.RE
+A name can usually be found from gcc -dumpmachine on the target.\& 
+The name can also usually be found in /usr/lib of the target.\&
+Only makes sense when setting cross=0.\&
+.P
+.RE
+ldd
+.P
+.RS 4
+The dynamic linker-loader of the targeted architecture.\&
+Valid examples include:
+.RS 4
+ld-linux-x86-64.\&so.\&2
+ld-linux-aarch64.\&so.\&1
+ld-linux-armhf.\&so.\&3
+ld-linux-riscv64-lp64d.\&so.\&1
+.RE
+A name can usually be found in /usr/lib/<arch_triplet>.\&
+Only makes sense when setting cross=0.\&
 .P
 .RE
 .SS KEYMAP

@@ -58,14 +58,19 @@ init_base()
         copy_exec "$_bin"
     done
 
-    if ! command -v ldd > /dev/null; then
-        print 'unable to find ldd' '~>'
-    fi
-
-    if ! command -v blkid > /dev/null; then
-        print 'unable to find blkid' '~>'
+    if [ "$cross" ]; then
+        print 'creating a cross-arch initrd' '~>'
+        return
     else
-        copy_exec blkid
+        if ! command -v ldd > /dev/null; then
+            print 'unable to find ldd' '~>'
+        fi
+
+        if ! command -v blkid > /dev/null; then
+            print 'unable to find blkid' '~>'
+        else
+            copy_exec blkid
+        fi
     fi
 
     copy_file "$config" /etc/tinyramfs/config    0644

@@ -25,11 +25,17 @@ copy_file()
 (
     file=$1; dest=$2
 
+    if [ "$cross" ]; then
+        _file=${file##*"${sysroot}"}
+    else
+        _file=$file
+    fi
+
     [ -e "${tmpdir}/${dest}" ] && return
 
     while [ -h "$file" ]; do
-        mkdir -p "${tmpdir}/${file%/*}"
-        cp -P "$file" "${tmpdir}/${file}"
+        mkdir -p "${tmpdir}/${_file%/*}"
+        cp -P "$file" "${tmpdir}/${_file}"
         cd -P "${file%/*}" || exit
 
         symlink=$(ls -ld "$file")
@@ -55,7 +61,13 @@ copy_file()
 
 copy_exec()
 {
+    if [ "$cross" ]; then
+        _PATH="$PATH"
+        PATH="${sysroot}/bin:${sysroot}/usr/bin:${sysroot}/sbin:${sysroot}/usr/sbin:$PATH"
+    fi
+
     _bin=$(command -v "$1")
+    PATH="$_PATH"
 
     case $_bin in /*) ;;
         '')
@@ -80,8 +92,12 @@ copy_exec()
 
     copy_file "$_bin" "/bin/${_bin##*/}" 0755 1
 
-    # TODO copy libs to the directory of interpreter.
-    ldd "$_bin" 2> /dev/null |
+    if [ "$cross" ]; then
+        _ldd="${sysroot}/${arch_triplet}/${ldd}"
+    else
+        _ldd=ldd
+    fi
+    "$_ldd" "$_bin" 2> /dev/null |
 
     while read -r _lib || [ "$_lib" ]; do
         _lib=${_lib#* => }
@@ -93,7 +109,7 @@ copy_exec()
 
 copy_kmod()
 {
-    modprobe -S "$kernel" -D "$1" 2> /dev/null |
+    modprobe -S "$kernel" -d "${moddir%%lib/modules*}" -D "$1" 2> /dev/null |
 
     while read -r _ _mod _ || [ "$_mod" ]; do
         case $_mod in /*) copy_file "$_mod" "$_mod" 0644; esac

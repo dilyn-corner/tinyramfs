@@ -35,6 +35,7 @@ monolith
 
 	(bool) Instructs tinyramfs whether or not to include kernel modules in
 	the initramfs.
+	monolith should be set if you are cross-building the initramfs.
 
 compress
 
@@ -49,6 +50,39 @@ hostonly
 root_type
 
 	The filesystem you're using for your root device (eg. ext4).
+
+cross
+
+	(bool) Instructs tinyramfs whether or not the created initramfs is for
+	an architecture different from the host.
+
+sysroot
+
+	A fully-qualified path to some target-architecture sysroot.
+	Only makes sense when setting cross=0.
+
+arch_triplet
+
+	The architecture triplet of the targeted architecture.
+	Valid examples include:
+		x86_64-linux-gnu
+		aarch64-linux-gnu
+		arm-linux-gnueabihf
+		riscv64-linux-gnu
+	A name can usually be found from gcc -dumpmachine on the target. 
+	The name can also usually be found in /usr/lib of the target.
+	Only makes sense when setting cross=0.
+		
+ldd
+
+	The dynamic linker-loader of the targeted architecture.
+	Valid examples include:
+		ld-linux-x86-64.so.2
+		ld-linux-aarch64.so.1
+		ld-linux-armhf.so.3
+		ld-linux-riscv64-lp64d.so.1
+	A name can usually be found in /usr/lib/<arch_triplet>.
+	Only makes sense when setting cross=0.
 
 ## KEYMAP
 
