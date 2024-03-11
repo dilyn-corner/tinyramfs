@@ -1,0 +1,846 @@
+# vim: set ft=sh:
+# shellcheck shell=sh
+#
+# https://shellcheck.net/wiki/SC2154
+# shellcheck disable=2154
+
+# n.b. this hook expects to be run in a snapcraft environment!
+# If you don't know what that means this hook probably isn't for you.
+
+# Cleanup after tinyramfs; we have our own init on Ubuntu Core
+(
+    cd "${tmpdir}" || panic 'Where did your initrd rootfs go?'
+
+	# We won't actually be using tinyramfs. Sad :(
+    rm -rf etc/tinyramfs lib/tinyramfs
+
+    unlink init
+    unlink bin/helper
+)
+
+# Copy our binaries from an optional sysroot if we are cross-building the initrd
+for bin in dmsetup modprobe busctl busybox dash dbus-daemon hostnamectl      \
+    journalctl kernel-install kmod localectl loginctl ls lzop mkdir          \
+    mkfifo mknod mount mountpoint networkctl partx plymouth systemctl        \
+    systemd systemd-ac-power systemd-analyze systemd-ask-password            \
+    systemd-cat systemd-cgls systemd-cgtop systemd-confext systemd-creds     \
+    systemd-cryptenroll systemd-cryptsetup systemd-delta systemd-detect-virt \
+    systemd-escape systemd-firstboot systemd-hwdb systemd-id128              \
+    systemd-inhibit systemd-machine-id-setup systemd-mount systemd-notify    \
+    systemd-path systemd-repart systemd-run systemd-socket-activate          \
+    systemd-stdio-bridge systemd-sysext systemd-sysusers systemd-tmpfiles    \
+    systemd-tty-ask-password-agent systemd-umount tar timedatectl umount     \
+    unsquashfs varlinkctl wget cryptsetup depmod dmsetup e2fsck fsck         \
+	fsck.ext4 fsck.fat fsck.vfat halt init insmod lsmod mke2fs mkfs.ext4     \
+    mkfs.fat mkfs.vfat modinfo modprobe plymouthd poweroff reboot rmmod      \
+    runlevel sfdisk shutdown sulogin telinit; do
+    copy_exec "${bin}"
+done
+
+# These should be symlinks to busybox
+for link in \[ \[\[ acpid arch ascii ash awk base32 basename blockdev cat chmod  \
+    chroot chvt clear cmp cp crc32 cut date deallocvt deluser devmem df dirname  \
+    du dumpkmap echo egrep env expr false fbset fgrep find fold fstrim grep      \
+    gunzip gzip hostname hwclock i2ctransfer ifconfig ip kill ln loadfont        \
+    loadkmap ls lzop mkdir mkfifo mknod mkswap mktemp more mv nuke openvt pidof  \
+    printf ps pwd readlink reset rm rmdir run-init sed seq setkeycodes sh sleep  \
+    sort stat static-sh stty switch_root sync tail tee test touch tr true ts tty \
+    uname uniq wc wget which yes; do
+    ln -sf busybox "${tmpdir}/usr/bin/${link}"
+done
+
+# Generate the hardware database
+systemd-hwdb --root "${tmpdir}" update --usr --strict
+
+# FIXME -- ../../ breaks tinyramfs link handling
+# copy_exec udevadm
+# copy_file usr/lib/systemd/systemd-udevd
+if [ -h /lib/systemd/systemd-udevd ]; then
+    ln -sf udevadm "${tmpdir}/bin/systemd-udevd"
+else
+    copy_exec /lib/systemd/systemd-udevd
+fi
+
+# FIXME -- foo/bar breaks tinyramfs link handling
+# copy_file usr/lib/systemd/systemd-sysroot-fstab-check
+if [ -h /usr/lib/systemd/systemd-sysroot-fstab-check ]; then
+    mkdir -p "${tmpdir}/usr/lib/systemd/system-generators"
+    ln -sf system-generators/systemd-fstab-generator "${tmpdir}/usr/lib/systemd/systemd-sysroot-fstab-check"
+else
+    copy_file /usr/lib/systemd/systemd-sysroot-fstab-check
+fi
+
+# dmsetup and modprobe are special, but these should be covered by the sbin -> usr/sbin
+# ln -sf ../usr/sbin/dmsetup  "${tmpdir}/sbin/dmsetup"
+# ln -sf ../usr/sbin/modprobe "${tmpdir}/sbin/modprobe"
+
+## Maybe we do not need these and the bins from above have us covered? TBD.
+#copy_exec "usr/lib/${ldd}"
+#for lib in ${ldd} libacl.so.1 libacl.so.1.1.2302 libapparmor.so.1                \
+#                  libapparmor.so.1.17.0 libargon2.so.1 libaudit.so.1             \
+#                  libaudit.so.1.0.0 libblkid.so.1 libblkid.so.1.1.0              \
+#                  libbrotlicommon.so.1 libbrotlicommon.so.1.1.0                  \
+#                  libbrotlidec.so.1 libbrotlidec.so.1.1.0 libbz2.so.1.0          \
+#                  libbz2.so.1.0.4 libc.so libc.so.6 libcap-ng.so.0               \
+#                  libcap-ng.so.0.0.0 libcap.so.2 libcap.so.2.66 libcom_err.so.2  \
+#                  libcom_err.so.2.1 libcrypt.so libcrypt.so.1 libcrypt.so.1.1.0  \
+#                  libcrypto.so.3 libcryptsetup.so.12 libcryptsetup.so.12.10.0    \
+#                  libdbus-1.so.3 libdbus-1.so.3.32.4 libdevmapper.so.1.02.1      \
+#                  libdrm.so.2 libdrm.so.2.4.0 libe2p.so.2 libe2p.so.2.3          \
+#                  libevdev.so.2 libevdev.so.2.3.0 libexpat.so libexpat.so.1      \
+#                  libexpat.so.1.9.0 libext2fs.so.2 libext2fs.so.2.4              \
+#                  libfdisk.so.1 libfdisk.so.1.1.0 libfreetype.so.6               \
+#                  libfreetype.so.6.20.1 libgcc_s.so.1 libgcrypt.so.20            \
+#                  libgcrypt.so.20.4.3 libgpg-error.so.0 libgpg-error.so.0.34.0   \
+#                  libjson-c.so.5 libjson-c.so.5.3.0 libkmod.so.2                 \
+#                  libkmod.so.2.4.0 liblz4.so.1 liblz4.so.1.9.4 liblzma.so.5      \
+#                  liblzma.so.5.4.5 liblzo2.so.2 liblzo2.so.2.0.0 libm.so         \
+#                  libm.so.6 libmount.so.1 libmount.so.1.1.0 libnss_compat.so.2   \
+#                  libnss_files.so.2 libpam.so.0 libpam.so.0.85.1                 \
+#                  libpcre2-8.so.0 libpcre2-8.so.0.11.2 libply-splash-core.so.5   \
+#                  libply-splash-core.so.5.0.0 libply-splash-graphics.so.5        \
+#                  libply-splash-graphics.so.5.0.0 libply.so.5 libply.so.5.0.0    \
+#                  libpng16.so.16 libpng16.so.16.43.0 libpopt.so.0                \
+#                  libpopt.so.0.0.2 libreadline.so.8 libreadline.so.8.2           \
+#                  libseccomp.so.2 libseccomp.so.2.5.5 libselinux.so.1            \
+#                  libsmartcols.so.1 libsmartcols.so.1.1.0 libsystemd.so.0        \
+#                  libsystemd.so.0.38.0 libtinfo.so libtinfo.so.6 libtinfo.so.6.4 \
+#                  libudev.so.1 libudev.so.1.7.8 libuuid.so.1 libuuid.so.1.3.0    \
+#                  libxkbcommon.so.0 libxkbcommon.so.0.0.0 libz.so libz.so.1      \
+#                  libz.so.1.3 libzstd.so.1 libzstd.so.1.5.5                      \
+#                  plymouth/label-freetype.so plymouth/renderers                  \
+#                  plymouth/renderers/drm.so plymouth/renderers/frame-buffer.so   \
+#                  plymouth/script.so plymouth/two-step.so                        \
+#                  systemd/libsystemd-core-255.so systemd/libsystemd-shared-255.so; do
+#    copy_file "$file"
+#done
+
+# Copy the modules and their dependencies we require
+
+# Copy additional, specified modules from tinyramfs config
+for mod in $extra_modules; do
+    mkdir -p "${tmpdir}/lib/modules/${kernel}/kernel/drivers/mmc/host"
+    cp -f "${CRAFT_STAGE}/lib/modules/${kernel}/kernel/drivers/mmc/host/sunxi-mmc.ko.zst" \
+        "${tmpdir}/lib/modules/${kernel}/kernel/drivers/mmc/host/sunxi-mmc.ko.zst"
+done
+
+# Copy the many required .ko files
+# For now we just use a big ol' list. There's probably a better way.
+#for mod in "${moddir}/${kernel}/kernel/drivers/hid/usbhid/usbkbd.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/usbhid/usbhid.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-retrode.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-vivaldi-common.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-koneplus.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-primax.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-gfrm.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-kye.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-rmi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-cp2112.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-plantronics.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-dr.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-waltop.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-steam.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/i2c-hid/i2c-hid-of-goodix.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/i2c-hid/i2c-hid.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/i2c-hid/i2c-hid-acpi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/i2c-hid/i2c-hid-of-elan.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/i2c-hid/i2c-hid-of.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-magicmouse.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-mf.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-saitek.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-logitech-dj.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-lenovo.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-zpff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-betopff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-glorious.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-led.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-mcp2221.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-vivaldi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-creative-sb0540.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-viewsonic.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-logitech-hidpp.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-elan.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-elecom.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-thrustmaster.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-alps.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-kone.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-aureal.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-icade.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-cypress.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-evision.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-pyra.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-xinmo.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-steelseries.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-nintendo.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-holtekff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-gt683r.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-ft260.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-topre.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-lua.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-maltron.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-sunplus.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-appleir.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-corsair.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-sigmamicro.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-a4tech.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-arvo.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-picolcd.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-ntrig.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-cougar.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/uhid.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-sensor-hub.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/wacom.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-speedlink.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-kovaplus.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-keytouch.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/ata/libahci.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/ata/ahci.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/message/fusion/mptscsih.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/message/fusion/mptspi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/message/fusion/mptbase.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/iio/industrialio.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/misc/enclosure.ko*" \
+#           "${moddir}/${kernel}/kernel/fs/autofs/autofs4.ko*" \
+#           "${moddir}/${kernel}/kernel/fs/nls/nls_iso8859-1.ko*" \
+#           "${moddir}/${kernel}/kernel/sound/core/snd-rawmidi.ko*" \
+#           "${moddir}/${kernel}/kernel/sound/core/snd.ko*" \
+#           "${moddir}/${kernel}/kernel/sound/core/snd-seq-device.ko*" \
+#           "${moddir}/${kernel}/kernel/sound/soundcore.ko*" \
+#           "${moddir}/${kernel}/kernel/crypto/algif_skcipher.ko*" \
+#           "${moddir}/${kernel}/kernel/crypto/af_alg.ko*" \
+#           "${moddir}/${kernel}/kernel/crypto/echainiv.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/power/supply/mt6360_charger.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/regulator/gpio-regulator.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/mmc/host/sdhci.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/mmc/host/sdhci-acpi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/mmc/host/cqhci.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/mmc/host/sdhci-pci.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/net/mdio/mdio-bcm-unimac.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/net/ethernet/broadcom/genet/genet.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/uio/uio_pdrv_genirq.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/uio/uio.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/tiny/bochs.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/ttm/ttm.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/virtio/virtio-gpu.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/drm_shmem_helper.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/drm_ttm_helper.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/drm.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/drm_kms_helper.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/gpu/drm/drm_vram_helper.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/md/dm-crypt.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-microsoft.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-sjoy.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-axff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-monterey.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-common.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-apple.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-holtek-kbd.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-udraw-ps3.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-logitech.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-ryos.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-razer.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-generic.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-nti.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-belkin.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-xiaomi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-holtek-mouse.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-ite.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-gyration.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-nvidia-shield.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-konepure.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-tmff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-penmount.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-lg-g15.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-gembird.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-zydacron.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-redragon.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-ezkey.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-wiimote.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-sony.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-pxrc.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-chicony.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-accutouch.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-savu.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-ortek.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-jabra.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-samsung.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-gaff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-tivo.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-playstation.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-letsketch.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-pl.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-multitouch.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-topseed.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-twinhan.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-uclogic.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-asus.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-cmedia.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-macally.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-petalynx.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-emsff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-semitek.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-lcpower.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-prodikeys.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-cherry.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-u2fzero.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-kensington.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-vrc2.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-elo.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-sensor-custom.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-megaworld.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-bigbenff.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/hid-roccat-isku.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/hid/usbhid/usbmouse.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/nvme/host/nvme.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/nvme/host/nvme-core.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/nvme/common/nvme-common.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/rc/rc-core.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/common/videobuf2/videobuf2-common.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/common/videobuf2/videobuf2-memops.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/common/videobuf2/videobuf2-vmalloc.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/common/videobuf2/videobuf2-v4l2.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/mc/mc.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/media/v4l2-core/videodev.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/leds/led-class-multicolor.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/scsi/raid_class.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/scsi/mpt3sas/mpt3sas.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/scsi/scsi_transport_spi.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/scsi/ses.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/scsi/megaraid/megaraid_sas.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/scsi/scsi_transport_sas.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/virtio/virtio_input.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/virtio/virtio_dma_buf.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/video/backlight/backlight.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/video/backlight/lcd.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/input/ff-memless.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/input/rmi4/rmi_core.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/usb/host/xhci-pci.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/usb/host/xhci-pci-renesas.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/usb/storage/usb-storage.ko*" \
+#           "${moddir}/${kernel}/kernel/drivers/usb/phy/phy-generic.ko*"; do
+#    copy_file "$mod"
+#done
+
+# This is the last thing. It's the rest of the file.
+# We have to grab everything that we expect to exist on the Ubuntu Core initrd.
+for file in usr/lib/snapd/info \
+            etc/sysctl.conf \
+            etc/sysctl.d/99-sysctl.conf \
+            usr/lib/modprobe.d/fbdev-blacklist.conf \
+            usr/lib/modprobe.d/systemd.conf \
+            usr/lib/sysctl.d/50-pid-max.conf \
+            usr/share/dbus-1/system.conf \
+            usr/lib/modprobe.d/fbdev-blacklist.conf \
+            usr/lib/systemd/network/73-usb-net-by-mac.link \
+            usr/lib/systemd/network/99-default.link \
+            usr/share/polkit-1/rules.d/systemd-networkd.rules \
+            usr/lib/systemd/system-generators/systemd-cryptsetup-generator \
+            usr/lib/systemd/system-generators/systemd-debug-generator \
+            usr/lib/systemd/system-generators/systemd-fstab-generator \
+            usr/lib/systemd/system-generators/systemd-getty-generator \
+            usr/lib/systemd/system-generators/systemd-hibernate-resume-generator \
+            usr/lib/systemd/system-generators/systemd-integritysetup-generator \
+            usr/lib/systemd/system-generators/systemd-rc-local-generator \
+            usr/lib/systemd/system-generators/systemd-run-generator \
+            usr/lib/systemd/system-generators/systemd-system-update-generator \
+            usr/lib/systemd/system-generators/systemd-sysv-generator \
+            usr/lib/systemd/system-generators/systemd-veritysetup-generator \
+            usr/lib/systemd/system-preset/90-systemd.preset \
+            usr/lib/systemd/system/autovt@.service \
+            usr/lib/systemd/system/basic.target \
+            usr/lib/systemd/system/blockdev@.target \
+            usr/lib/systemd/system/bluetooth.target \
+            usr/lib/systemd/system/boot-complete.target \
+            usr/lib/systemd/system/console-getty.service \
+            usr/lib/systemd/system/container-getty@.service \
+            usr/lib/systemd/system/cryptdisks-early.service \
+            usr/lib/systemd/system/cryptdisks.service \
+            usr/lib/systemd/system/cryptsetup-pre.target \
+            usr/lib/systemd/system/cryptsetup.target \
+            usr/lib/systemd/system/ctrl-alt-del.target \
+            usr/lib/systemd/system/dbus-org.freedesktop.hostname1.service \
+            usr/lib/systemd/system/dbus-org.freedesktop.locale1.service \
+            usr/lib/systemd/system/dbus-org.freedesktop.login1.service \
+            usr/lib/systemd/system/dbus-org.freedesktop.timedate1.service \
+            usr/lib/systemd/system/dbus.service \
+            usr/lib/systemd/system/dbus.socket \
+            usr/lib/systemd/system/debug-shell.service \
+            usr/lib/systemd/system/default.target \
+            usr/lib/systemd/system/dev-hugepages.mount \
+            usr/lib/systemd/system/dev-mqueue.mount \
+            usr/lib/systemd/system/emergency.service \
+            usr/lib/systemd/system/emergency.target \
+            usr/lib/systemd/system/exit.target \
+            usr/lib/systemd/system/factory-reset.target \
+            usr/lib/systemd/system/final.target \
+            usr/lib/systemd/system/first-boot-complete.target \
+            usr/lib/systemd/system/getty-pre.target \
+            usr/lib/systemd/system/getty-static.service \
+            usr/lib/systemd/system/getty.target \
+            usr/lib/systemd/system/getty.target.wants/getty-static.service \
+            usr/lib/systemd/system/getty@.service \
+            usr/lib/systemd/system/graphical.target \
+            usr/lib/systemd/system/graphical.target.wants/systemd-update-utmp-runlevel.service \
+            usr/lib/systemd/system/halt.target \
+            usr/lib/systemd/system/hibernate.target \
+            usr/lib/systemd/system/hwclock.service \
+            usr/lib/systemd/system/hybrid-sleep.target \
+            usr/lib/systemd/system/initrd-cleanup.service \
+            usr/lib/systemd/system/initrd-fs.target \
+            usr/lib/systemd/system/initrd-parse-etc.service \
+            usr/lib/systemd/system/initrd-root-device.target \
+            usr/lib/systemd/system/initrd-root-device.target.wants/remote-cryptsetup.target \
+            usr/lib/systemd/system/initrd-root-device.target.wants/remote-veritysetup.target \
+            usr/lib/systemd/system/initrd-root-fs.target \
+            usr/lib/systemd/system/initrd-root-fs.target.wants/systemd-repart.service \
+            usr/lib/systemd/system/initrd-switch-root.service \
+            usr/lib/systemd/system/initrd-switch-root.target \
+            usr/lib/systemd/system/initrd-udevadm-cleanup-db.service \
+            usr/lib/systemd/system/initrd-usr-fs.target \
+            usr/lib/systemd/system/initrd.target \
+            usr/lib/systemd/system/initrd.target.wants/systemd-battery-check.service \
+            usr/lib/systemd/system/initrd.target.wants/systemd-bsod.service \
+            usr/lib/systemd/system/integritysetup-pre.target \
+            usr/lib/systemd/system/integritysetup.target \
+            usr/lib/systemd/system/kexec.target \
+            usr/lib/systemd/system/kmod-static-nodes.service \
+            usr/lib/systemd/system/kmod.service \
+            usr/lib/systemd/system/ldconfig.service \
+            usr/lib/systemd/system/local-fs-pre.target \
+            usr/lib/systemd/system/local-fs.target \
+            usr/lib/systemd/system/machine.slice \
+            usr/lib/systemd/system/modprobe@.service \
+            usr/lib/systemd/system/multi-user.target \
+            usr/lib/systemd/system/multi-user.target.wants/getty.target \
+            usr/lib/systemd/system/multi-user.target.wants/systemd-ask-password-wall.path \
+            usr/lib/systemd/system/multi-user.target.wants/systemd-logind.service \
+            usr/lib/systemd/system/multi-user.target.wants/systemd-update-utmp-runlevel.service \
+            usr/lib/systemd/system/multi-user.target.wants/systemd-user-sessions.service \
+            usr/lib/systemd/system/network-online.target \
+            usr/lib/systemd/system/network-pre.target \
+            usr/lib/systemd/system/network.target \
+            usr/lib/systemd/system/nss-lookup.target \
+            usr/lib/systemd/system/nss-user-lookup.target \
+            usr/lib/systemd/system/paths.target \
+            usr/lib/systemd/system/poweroff.target \
+            usr/lib/systemd/system/printer.target \
+            usr/lib/systemd/system/proc-sys-fs-binfmt_misc.mount \
+            usr/lib/systemd/system/procps.service \
+            usr/lib/systemd/system/quotaon.service \
+            usr/lib/systemd/system/rc-local.service \
+            usr/lib/systemd/system/rc-local.service.d/debian.conf \
+            usr/lib/systemd/system/reboot.target \
+            usr/lib/systemd/system/remote-cryptsetup.target \
+            usr/lib/systemd/system/remote-fs-pre.target \
+            usr/lib/systemd/system/remote-fs.target \
+            usr/lib/systemd/system/remote-veritysetup.target \
+            usr/lib/systemd/system/rescue.service \
+            usr/lib/systemd/system/rescue.target \
+            usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service \
+            usr/lib/systemd/system/rpcbind.target \
+            usr/lib/systemd/system/runlevel0.target \
+            usr/lib/systemd/system/runlevel1.target \
+            usr/lib/systemd/system/runlevel2.target \
+            usr/lib/systemd/system/runlevel3.target \
+            usr/lib/systemd/system/runlevel4.target \
+            usr/lib/systemd/system/runlevel5.target \
+            usr/lib/systemd/system/runlevel6.target \
+            usr/lib/systemd/system/serial-getty@.service \
+            usr/lib/systemd/system/shutdown.target \
+            usr/lib/systemd/system/sigpwr.target \
+            usr/lib/systemd/system/sleep.target \
+            usr/lib/systemd/system/slices.target \
+            usr/lib/systemd/system/smartcard.target \
+            lib/systemd/system/snapd.recovery-chooser-trigger.service \
+            usr/lib/systemd/system/sockets.target \
+            usr/lib/systemd/system/sockets.target.wants/systemd-initctl.socket \
+            usr/lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket \
+            usr/lib/systemd/system/sockets.target.wants/systemd-journald.socket \
+            usr/lib/systemd/system/sockets.target.wants/systemd-pcrextend.socket \
+            usr/lib/systemd/system/sockets.target.wants/systemd-sysext.socket \
+            usr/lib/systemd/system/sockets.target.wants/systemd-udevd-control.socket \
+            usr/lib/systemd/system/sockets.target.wants/systemd-udevd-kernel.socket \
+            usr/lib/systemd/system/soft-reboot.target \
+            usr/lib/systemd/system/sound.target \
+            usr/lib/systemd/system/storage-target-mode.target \
+            usr/lib/systemd/system/suspend-then-hibernate.target \
+            usr/lib/systemd/system/suspend.target \
+            usr/lib/systemd/system/swap.target \
+            usr/lib/systemd/system/sys-fs-fuse-connections.mount \
+            usr/lib/systemd/system/sys-kernel-config.mount \
+            usr/lib/systemd/system/sys-kernel-debug.mount \
+            usr/lib/systemd/system/sys-kernel-tracing.mount \
+            usr/lib/systemd/system/sysinit.target \
+            usr/lib/systemd/system/sysinit.target.wants/cryptsetup.target \
+            usr/lib/systemd/system/sysinit.target.wants/dev-hugepages.mount \
+            usr/lib/systemd/system/sysinit.target.wants/dev-mqueue.mount \
+            usr/lib/systemd/system/sysinit.target.wants/integritysetup.target \
+            usr/lib/systemd/system/sysinit.target.wants/kmod-static-nodes.service \
+            usr/lib/systemd/system/sysinit.target.wants/ldconfig.service \
+            usr/lib/systemd/system/sysinit.target.wants/sys-fs-fuse-connections.mount \
+            usr/lib/systemd/system/sysinit.target.wants/sys-kernel-config.mount \
+            usr/lib/systemd/system/sysinit.target.wants/sys-kernel-debug.mount \
+            usr/lib/systemd/system/sysinit.target.wants/sys-kernel-tracing.mount \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-ask-password-console.path \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-binfmt.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-firstboot.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-hwdb-update.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-journal-catalog-update.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-journal-flush.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-journald.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-machine-id-commit.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-modules-load.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-pcrmachine.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-random-seed.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-repart.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-sysctl.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-sysusers.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup-dev-early.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup-dev.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup-early.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-udev-trigger.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-udevd.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-update-done.service \
+            usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service \
+            usr/lib/systemd/system/sysinit.target.wants/veritysetup.target \
+            usr/lib/systemd/system/syslog.socket \
+            usr/lib/systemd/system/system-systemd\\x2dcryptsetup.slice \
+            usr/lib/systemd/system/system-systemd\\x2dveritysetup.slice \
+            usr/lib/systemd/system/system-update-cleanup.service \
+            usr/lib/systemd/system/system-update-pre.target \
+            usr/lib/systemd/system/system-update.target \
+            usr/lib/systemd/system/systemd-ask-password-console.path \
+            usr/lib/systemd/system/systemd-ask-password-console.service \
+            usr/lib/systemd/system/systemd-ask-password-wall.path \
+            usr/lib/systemd/system/systemd-ask-password-wall.service \
+            usr/lib/systemd/system/systemd-backlight@.service \
+            usr/lib/systemd/system/systemd-battery-check.service \
+            usr/lib/systemd/system/systemd-binfmt.service \
+            usr/lib/systemd/system/systemd-boot-check-no-failures.service \
+            usr/lib/systemd/system/systemd-bsod.service \
+            usr/lib/systemd/system/systemd-confext.service \
+            usr/lib/systemd/system/systemd-exit.service \
+            usr/lib/systemd/system/systemd-firstboot.service \
+            usr/lib/systemd/system/systemd-fsck-root.service \
+            usr/lib/systemd/system/systemd-fsck@.service \
+            usr/lib/systemd/system/systemd-fsckd.service \
+            usr/lib/systemd/system/systemd-fsckd.socket \
+            usr/lib/systemd/system/systemd-growfs-root.service \
+            usr/lib/systemd/system/systemd-growfs@.service \
+            usr/lib/systemd/system/systemd-halt.service \
+            usr/lib/systemd/system/systemd-hibernate-resume.service \
+            usr/lib/systemd/system/systemd-hibernate.service \
+            usr/lib/systemd/system/systemd-hostnamed.service \
+            usr/lib/systemd/system/systemd-hwdb-update.service \
+            usr/lib/systemd/system/systemd-hybrid-sleep.service \
+            usr/lib/systemd/system/systemd-initctl.service \
+            usr/lib/systemd/system/systemd-initctl.socket \
+            usr/lib/systemd/system/systemd-journal-catalog-update.service \
+            usr/lib/systemd/system/systemd-journal-flush.service \
+            usr/lib/systemd/system/systemd-journald-audit.socket \
+            usr/lib/systemd/system/systemd-journald-dev-log.socket \
+            usr/lib/systemd/system/systemd-journald-varlink@.socket \
+            usr/lib/systemd/system/systemd-journald.service \
+            usr/lib/systemd/system/systemd-journald.socket \
+            usr/lib/systemd/system/systemd-journald@.service \
+            usr/lib/systemd/system/systemd-journald@.socket \
+            usr/lib/systemd/system/systemd-kexec.service \
+            usr/lib/systemd/system/systemd-localed.service \
+            usr/lib/systemd/system/systemd-localed.service.d/x11-keyboard.conf \
+            usr/lib/systemd/system/systemd-logind.service \
+            usr/lib/systemd/system/systemd-logind.service.d/dbus.conf \
+            usr/lib/systemd/system/systemd-logind.service.d/nice.conf \
+            usr/lib/systemd/system/systemd-machine-id-commit.service \
+            usr/lib/systemd/system/systemd-modules-load.service \
+            usr/lib/systemd/system/systemd-network-generator.service \
+            usr/lib/systemd/system/systemd-networkd-wait-online.service \
+            usr/lib/systemd/system/systemd-networkd-wait-online@.service \
+            usr/lib/systemd/system/systemd-networkd.service \
+            usr/lib/systemd/system/systemd-networkd.socket \
+            usr/lib/systemd/system/systemd-pcrextend.socket \
+            usr/lib/systemd/system/systemd-pcrextend@.service \
+            usr/lib/systemd/system/systemd-pcrfs-root.service \
+            usr/lib/systemd/system/systemd-pcrfs@.service \
+            usr/lib/systemd/system/systemd-pcrlock-file-system.service \
+            usr/lib/systemd/system/systemd-pcrlock-firmware-code.service \
+            usr/lib/systemd/system/systemd-pcrlock-firmware-config.service \
+            usr/lib/systemd/system/systemd-pcrlock-machine-id.service \
+            usr/lib/systemd/system/systemd-pcrlock-make-policy.service \
+            usr/lib/systemd/system/systemd-pcrlock-secureboot-authority.service \
+            usr/lib/systemd/system/systemd-pcrlock-secureboot-policy.service \
+            usr/lib/systemd/system/systemd-pcrmachine.service \
+            usr/lib/systemd/system/systemd-poweroff.service \
+            usr/lib/systemd/system/systemd-pstore.service \
+            usr/lib/systemd/system/systemd-quotacheck.service \
+            usr/lib/systemd/system/systemd-random-seed.service \
+            usr/lib/systemd/system/systemd-reboot.service \
+            usr/lib/systemd/system/systemd-remount-fs.service \
+            usr/lib/systemd/system/systemd-repart.service \
+            usr/lib/systemd/system/systemd-rfkill.service \
+            usr/lib/systemd/system/systemd-rfkill.socket \
+            usr/lib/systemd/system/systemd-soft-reboot.service \
+            usr/lib/systemd/system/systemd-storagetm.service \
+            usr/lib/systemd/system/systemd-suspend-then-hibernate.service \
+            usr/lib/systemd/system/systemd-suspend.service \
+            usr/lib/systemd/system/systemd-sysctl.service \
+            usr/lib/systemd/system/systemd-sysext.service \
+            usr/lib/systemd/system/systemd-sysext.socket \
+            usr/lib/systemd/system/systemd-sysext@.service \
+            usr/lib/systemd/system/systemd-sysupdate-reboot.service \
+            usr/lib/systemd/system/systemd-sysupdate-reboot.timer \
+            usr/lib/systemd/system/systemd-sysupdate.service \
+            usr/lib/systemd/system/systemd-sysupdate.timer \
+            usr/lib/systemd/system/systemd-sysusers.service \
+            usr/lib/systemd/system/systemd-time-wait-sync.service \
+            usr/lib/systemd/system/systemd-timedated.service \
+            usr/lib/systemd/system/systemd-tmpfiles-clean.service \
+            usr/lib/systemd/system/systemd-tmpfiles-clean.timer \
+            usr/lib/systemd/system/systemd-tmpfiles-setup-dev-early.service \
+            usr/lib/systemd/system/systemd-tmpfiles-setup-dev.service \
+            usr/lib/systemd/system/systemd-tmpfiles-setup.service \
+            usr/lib/systemd/system/systemd-tpm2-setup-early.service \
+            usr/lib/systemd/system/systemd-tpm2-setup.service \
+            usr/lib/systemd/system/systemd-udev-settle.service \
+            usr/lib/systemd/system/systemd-udev-trigger.service \
+            usr/lib/systemd/system/systemd-udevd-control.socket \
+            usr/lib/systemd/system/systemd-udevd-kernel.socket \
+            usr/lib/systemd/system/systemd-udevd.service \
+            usr/lib/systemd/system/systemd-udevd.service.d/syscall-architecture.conf \
+            usr/lib/systemd/system/systemd-update-done.service \
+            usr/lib/systemd/system/systemd-update-utmp-runlevel.service \
+            usr/lib/systemd/system/systemd-update-utmp.service \
+            usr/lib/systemd/system/systemd-user-sessions.service \
+            usr/lib/systemd/system/systemd-volatile-root.service \
+            usr/lib/systemd/system/time-set.target \
+            usr/lib/systemd/system/time-sync.target \
+            usr/lib/systemd/system/timers.target \
+            usr/lib/systemd/system/timers.target.wants/systemd-tmpfiles-clean.timer \
+            usr/lib/systemd/system/udev.service \
+            usr/lib/systemd/system/umount.target \
+            usr/lib/systemd/system/usb-gadget.target \
+            usr/lib/systemd/system/user-.slice.d/10-defaults.conf \
+            usr/lib/systemd/system/user-runtime-dir@.service \
+            usr/lib/systemd/system/user.slice \
+            usr/lib/systemd/system/user@.service \
+            usr/lib/systemd/system/user@.service.d/10-login-barrier.conf \
+            usr/lib/systemd/system/user@.service.d/timeout.conf \
+            usr/lib/systemd/system/user@0.service.d/10-login-barrier.conf \
+            usr/lib/systemd/system/veritysetup-pre.target \
+            usr/lib/systemd/system/veritysetup.target \
+            usr/lib/systemd/system/x11-common.service \
+            usr/lib/systemd/systemd \
+            usr/lib/systemd/systemd-backlight \
+            usr/lib/systemd/systemd-battery-check \
+            usr/lib/systemd/systemd-binfmt \
+            usr/lib/systemd/systemd-boot-check-no-failures \
+            usr/lib/systemd/systemd-bootchart \
+            usr/lib/systemd/systemd-bsod \
+            usr/lib/systemd/systemd-cgroups-agent \
+            usr/lib/systemd/systemd-cryptsetup \
+            usr/lib/systemd/systemd-executor \
+            usr/lib/systemd/systemd-fsck \
+            usr/lib/systemd/systemd-fsckd \
+            usr/lib/systemd/systemd-growfs \
+            usr/lib/systemd/systemd-hibernate-resume \
+            usr/lib/systemd/systemd-hostnamed \
+            usr/lib/systemd/systemd-initctl \
+            usr/lib/systemd/systemd-integritysetup \
+            usr/lib/systemd/systemd-journald \
+            usr/lib/systemd/systemd-localed \
+            usr/lib/systemd/systemd-logind \
+            usr/lib/systemd/systemd-makefs \
+            usr/lib/systemd/systemd-measure \
+            usr/lib/systemd/systemd-modules-load \
+            usr/lib/systemd/systemd-network-generator \
+            usr/lib/systemd/systemd-networkd \
+            usr/lib/systemd/systemd-networkd-wait-online \
+            usr/lib/systemd/systemd-pcrextend \
+            usr/lib/systemd/systemd-pcrlock \
+            usr/lib/systemd/systemd-pstore \
+            usr/lib/systemd/systemd-quotacheck \
+            usr/lib/systemd/systemd-random-seed \
+            usr/lib/systemd/systemd-remount-fs \
+            usr/lib/systemd/systemd-reply-password \
+            usr/lib/systemd/systemd-rfkill \
+            usr/lib/systemd/systemd-shutdown \
+            usr/lib/systemd/systemd-sleep \
+            usr/lib/systemd/systemd-socket-proxyd \
+            usr/lib/systemd/systemd-storagetm \
+            usr/lib/systemd/systemd-sulogin-shell \
+            usr/lib/systemd/systemd-sysctl \
+            usr/lib/systemd/systemd-sysupdate \
+            usr/lib/systemd/systemd-sysv-install \
+            usr/lib/systemd/systemd-time-wait-sync \
+            usr/lib/systemd/systemd-timedated \
+            usr/lib/systemd/systemd-tpm2-setup \
+            usr/lib/systemd/systemd-update-done \
+            usr/lib/systemd/systemd-update-utmp \
+            usr/lib/systemd/systemd-user-runtime-dir \
+            usr/lib/systemd/systemd-user-sessions \
+            usr/lib/systemd/systemd-veritysetup \
+            usr/lib/systemd/systemd-volatile-root \
+            usr/lib/systemd/systemd-xdg-autostart-condition \
+            usr/lib/sysusers.d/debian-udev.conf \
+            usr/lib/tmpfiles.d/credstore.conf \
+            usr/lib/tmpfiles.d/debian.conf \
+            usr/lib/tmpfiles.d/home.conf \
+            usr/lib/tmpfiles.d/journal-nocow.conf \
+            usr/lib/tmpfiles.d/legacy.conf \
+            usr/lib/tmpfiles.d/provision.conf \
+            usr/lib/tmpfiles.d/static-nodes-permissions.conf \
+            usr/lib/tmpfiles.d/systemd-network.conf \
+            usr/lib/tmpfiles.d/systemd-nologin.conf \
+            usr/lib/tmpfiles.d/systemd-pstore.conf \
+            usr/lib/tmpfiles.d/systemd-tmp.conf \
+            usr/lib/tmpfiles.d/systemd.conf \
+            usr/lib/tmpfiles.d/tmp.conf \
+            usr/lib/tmpfiles.d/var.conf \
+            usr/lib/tmpfiles.d/x11.conf \
+            usr/lib/udev/ata_id \
+            usr/lib/udev/cdrom_id \
+            usr/lib/udev/fido_id \
+            usr/lib/udev/iocost \
+            usr/lib/udev/mtd_probe \
+            usr/lib/udev/rules.d/40-vm-hotadd.rules \
+            usr/lib/udev/rules.d/50-firmware.rules \
+            usr/lib/udev/rules.d/50-udev-default.rules \
+            usr/lib/udev/rules.d/55-dm.rules \
+            usr/lib/udev/rules.d/60-autosuspend.rules \
+            usr/lib/udev/rules.d/60-block.rules \
+            usr/lib/udev/rules.d/60-cdrom_id.rules \
+            usr/lib/udev/rules.d/60-dmi-id.rules \
+            usr/lib/udev/rules.d/60-drm.rules \
+            usr/lib/udev/rules.d/60-evdev.rules \
+            usr/lib/udev/rules.d/60-fido-id.rules \
+            usr/lib/udev/rules.d/60-infiniband.rules \
+            usr/lib/udev/rules.d/60-input-id.rules \
+            usr/lib/udev/rules.d/60-persistent-alsa.rules \
+            usr/lib/udev/rules.d/60-persistent-input.rules \
+            usr/lib/udev/rules.d/60-persistent-storage-dm.rules \
+            usr/lib/udev/rules.d/60-persistent-storage-mtd.rules \
+            usr/lib/udev/rules.d/60-persistent-storage-tape.rules \
+            usr/lib/udev/rules.d/60-persistent-storage.rules \
+            usr/lib/udev/rules.d/60-persistent-v4l.rules \
+            usr/lib/udev/rules.d/60-sensor.rules \
+            usr/lib/udev/rules.d/60-serial.rules \
+            usr/lib/udev/rules.d/61-persistent-storage-android.rules \
+            usr/lib/udev/rules.d/64-btrfs.rules \
+            usr/lib/udev/rules.d/70-camera.rules \
+            usr/lib/udev/rules.d/70-joystick.rules \
+            usr/lib/udev/rules.d/70-mouse.rules \
+            usr/lib/udev/rules.d/70-power-switch.rules \
+            usr/lib/udev/rules.d/70-touchpad.rules \
+            usr/lib/udev/rules.d/70-uaccess.rules \
+            usr/lib/udev/rules.d/71-power-switch-proliant.rules \
+            usr/lib/udev/rules.d/71-seat.rules \
+            usr/lib/udev/rules.d/73-seat-late.rules \
+            usr/lib/udev/rules.d/73-special-net-names.rules \
+            usr/lib/udev/rules.d/75-net-description.rules \
+            usr/lib/udev/rules.d/75-probe_mtd.rules \
+            usr/lib/udev/rules.d/78-graphics-card.rules \
+            usr/lib/udev/rules.d/78-sound-card.rules \
+            usr/lib/udev/rules.d/80-debian-compat.rules \
+            usr/lib/udev/rules.d/80-drivers.rules \
+            usr/lib/udev/rules.d/80-net-setup-link.rules \
+            usr/lib/udev/rules.d/81-net-dhcp.rules \
+            usr/lib/udev/rules.d/90-iocost.rules \
+            usr/lib/udev/rules.d/95-dm-notify.rules \
+            usr/lib/udev/rules.d/99-systemd.rules \
+            usr/lib/udev/scsi_id \
+            usr/lib/udev/v4l_id \
+            usr/share/libdrm/amdgpu.ids \
+            usr/share/plymouth/themes/bgrt/bgrt.plymouth \
+            usr/share/plymouth/themes/spinner/animation-0001.png \
+            usr/share/plymouth/themes/spinner/animation-0002.png \
+            usr/share/plymouth/themes/spinner/animation-0003.png \
+            usr/share/plymouth/themes/spinner/animation-0004.png \
+            usr/share/plymouth/themes/spinner/animation-0005.png \
+            usr/share/plymouth/themes/spinner/animation-0006.png \
+            usr/share/plymouth/themes/spinner/animation-0007.png \
+            usr/share/plymouth/themes/spinner/animation-0008.png \
+            usr/share/plymouth/themes/spinner/animation-0009.png \
+            usr/share/plymouth/themes/spinner/animation-0010.png \
+            usr/share/plymouth/themes/spinner/animation-0011.png \
+            usr/share/plymouth/themes/spinner/animation-0012.png \
+            usr/share/plymouth/themes/spinner/animation-0013.png \
+            usr/share/plymouth/themes/spinner/animation-0014.png \
+            usr/share/plymouth/themes/spinner/animation-0015.png \
+            usr/share/plymouth/themes/spinner/animation-0016.png \
+            usr/share/plymouth/themes/spinner/animation-0017.png \
+            usr/share/plymouth/themes/spinner/animation-0018.png \
+            usr/share/plymouth/themes/spinner/animation-0019.png \
+            usr/share/plymouth/themes/spinner/animation-0020.png \
+            usr/share/plymouth/themes/spinner/animation-0021.png \
+            usr/share/plymouth/themes/spinner/animation-0022.png \
+            usr/share/plymouth/themes/spinner/animation-0023.png \
+            usr/share/plymouth/themes/spinner/animation-0024.png \
+            usr/share/plymouth/themes/spinner/animation-0025.png \
+            usr/share/plymouth/themes/spinner/animation-0026.png \
+            usr/share/plymouth/themes/spinner/animation-0027.png \
+            usr/share/plymouth/themes/spinner/animation-0028.png \
+            usr/share/plymouth/themes/spinner/animation-0029.png \
+            usr/share/plymouth/themes/spinner/animation-0030.png \
+            usr/share/plymouth/themes/spinner/animation-0031.png \
+            usr/share/plymouth/themes/spinner/animation-0032.png \
+            usr/share/plymouth/themes/spinner/animation-0033.png \
+            usr/share/plymouth/themes/spinner/animation-0034.png \
+            usr/share/plymouth/themes/spinner/animation-0035.png \
+            usr/share/plymouth/themes/spinner/animation-0036.png \
+            usr/share/plymouth/themes/spinner/bgrt-fallback.png \
+            usr/share/plymouth/themes/spinner/bullet.png \
+            usr/share/plymouth/themes/spinner/capslock.png \
+            usr/share/plymouth/themes/spinner/entry.png \
+            usr/share/plymouth/themes/spinner/keyboard.png \
+            usr/share/plymouth/themes/spinner/keymap-render.png \
+            usr/share/plymouth/themes/spinner/lock.png \
+            usr/share/plymouth/themes/spinner/spinner.plymouth \
+            usr/share/plymouth/themes/spinner/throbber-0001.png \
+            usr/share/plymouth/themes/spinner/throbber-0002.png \
+            usr/share/plymouth/themes/spinner/throbber-0003.png \
+            usr/share/plymouth/themes/spinner/throbber-0004.png \
+            usr/share/plymouth/themes/spinner/throbber-0005.png \
+            usr/share/plymouth/themes/spinner/throbber-0006.png \
+            usr/share/plymouth/themes/spinner/throbber-0007.png \
+            usr/share/plymouth/themes/spinner/throbber-0008.png \
+            usr/share/plymouth/themes/spinner/throbber-0009.png \
+            usr/share/plymouth/themes/spinner/throbber-0010.png \
+            usr/share/plymouth/themes/spinner/throbber-0011.png \
+            usr/share/plymouth/themes/spinner/throbber-0012.png \
+            usr/share/plymouth/themes/spinner/throbber-0013.png \
+            usr/share/plymouth/themes/spinner/throbber-0014.png \
+            usr/share/plymouth/themes/spinner/throbber-0015.png \
+            usr/share/plymouth/themes/spinner/throbber-0016.png \
+            usr/share/plymouth/themes/spinner/throbber-0017.png \
+            usr/share/plymouth/themes/spinner/throbber-0018.png \
+            usr/share/plymouth/themes/spinner/throbber-0019.png \
+            usr/share/plymouth/themes/spinner/throbber-0020.png \
+            usr/share/plymouth/themes/spinner/throbber-0021.png \
+            usr/share/plymouth/themes/spinner/throbber-0022.png \
+            usr/share/plymouth/themes/spinner/throbber-0023.png \
+            usr/share/plymouth/themes/spinner/throbber-0024.png \
+            usr/share/plymouth/themes/spinner/throbber-0025.png \
+            usr/share/plymouth/themes/spinner/throbber-0026.png \
+            usr/share/plymouth/themes/spinner/throbber-0027.png \
+            usr/share/plymouth/themes/spinner/throbber-0028.png \
+            usr/share/plymouth/themes/spinner/throbber-0029.png \
+            usr/share/plymouth/themes/spinner/throbber-0030.png \
+            usr/share/plymouth/themes/spinner/throbber.svg \
+            usr/share/plymouth/themes/spinner/watermark.png \
+            usr/lib/systemd/system/plymouth-start.service \
+            usr/lib/systemd/system/plymouth-switch-root.service; do
+  copy_file "${sysroot}/${file}" "${file}"
+done
+
+find "${sysroot}/usr/lib/ubuntu-core-initramfs/main" -type f | while read -r file; do
+    copy_file "$file" "${file##*main}"
+done
+find "${sysroot}/snapd" -type f | while read -r file; do
+    copy_file "$file" "${file}"
+done
+
+# FIXME
+rm -rf "${tmpdir}/root/parts" "${tmpdir}/root/stage"
