@@ -42,7 +42,7 @@ copy_file()
         symlink=${symlink##* -> }
 
         case $symlink in
-            /*) file=$symlink ;;
+            /*|..*) file=$symlink ;;
             *)  file="${PWD}/${symlink##*/}" ;;
         esac
     done
